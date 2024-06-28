@@ -1,3 +1,6 @@
+use std::io::{Error, ErrorKind};
+
+#[derive(Debug)]
 pub enum Arg {
     // Core OSC Type Tags
     Int(i32),
@@ -5,8 +8,8 @@ pub enum Arg {
     Str(String),
     Blob(Vec<u8>),
     // Nonstandard OSC Type Tags
-    Int64(i64),
-    Double(f64),
+    // Int64(i64),
+    // Double(f64),
 }
 
 fn arg_char_repr(arg: &Arg) -> char {
@@ -16,8 +19,21 @@ fn arg_char_repr(arg: &Arg) -> char {
         Float(_) => 'f',
         Str(_) => 's',
         Blob(_) => 'b',
-        Int64(_) => 'h',
-        Double(_) => 'd',
+        // Int64(_) => 'h',
+        // Double(_) => 'd',
+    }
+}
+
+fn type_tag_to_default_arg(tag: char) -> Result<Arg, Error> {
+    match tag {
+        'i' => Ok(Arg::Int(0)),
+        'f' => Ok(Arg::Float(0.0)),
+        's' => Ok(Arg::Str("".to_string())),
+        'b' => Ok(Arg::Blob(Vec::new())),
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Unrecognised OSC type tag: {tag}"),
+        )),
     }
 }
 
@@ -40,21 +56,37 @@ fn write_arg(arg: &Arg) -> Vec<u8> {
     use self::Arg::*;
     match arg {
         Float(f) => f.to_be_bytes().to_vec(),
-        Double(d) => d.to_be_bytes().to_vec(),
+        // Double(d) => d.to_be_bytes().to_vec(),
         Int(i) => i.to_be_bytes().to_vec(),
-        Int64(h) => h.to_be_bytes().to_vec(),
+        // Int64(h) => h.to_be_bytes().to_vec(),
         Str(s) => write_string(s.to_string()),
         Blob(b) => write_blob(b.to_vec()),
     }
 }
 
-pub struct OscMessage<'a> {
-    address: &'a str,
-    args: Vec<Arg>,
+fn scan_into_byte_array(arr: &mut [u8], idx: &mut usize, data: &[u8]) -> Result<(), Error> {
+    for item in arr {
+        *item = match data.get(*idx) {
+            Some(n) => *n,
+            None => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "Expected more data, given argument type tags",
+                ));
+            }
+        };
+        *idx += 1;
+    }
+    Ok(())
 }
 
-impl<'a> OscMessage<'a> {
-    pub fn new(address: &'a str, args: Vec<Arg>) -> Self {
+pub struct OscMessage {
+    pub address: String,
+    pub args: Vec<Arg>,
+}
+
+impl OscMessage {
+    pub fn new(address: String, args: Vec<Arg>) -> Self {
         Self { address, args }
     }
 
@@ -85,5 +117,121 @@ impl<'a> OscMessage<'a> {
         msg.append(&mut message_arguments);
 
         msg
+    }
+
+    pub fn parse_bytes(data: &[u8]) -> Result<Self, Error> {
+        if data.len() % 4 != 0 {
+            // All valid OSC data has a length multiple of 32, so error if not.
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "Input data length is not a multiple of 32",
+            ));
+        }
+
+        let mut curr_datagram = Vec::new();
+        let mut i: usize = 0;
+
+        while i < data.len() {
+            if data[i] != 0 {
+                curr_datagram.push(data[i]);
+            } else {
+                break;
+            }
+            i += 1;
+        }
+
+        let address: String = match String::from_utf8(std::mem::take(&mut curr_datagram)) {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "OSC address not valid utf-8",
+                ))
+            }
+        };
+
+        // Skip to the next part, which is always 32bit/4 byte aligned
+        i += 4 - (i % 4);
+
+        while i < data.len() {
+            if data[i] != 0 {
+                curr_datagram.push(data[i]);
+            } else {
+                break;
+            }
+            i += 1;
+        }
+
+        i += 4 - (i % 4);
+
+        let mut arg_types_str = match String::from_utf8(std::mem::take(&mut curr_datagram)) {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "OSC argument type tags not valid utf-8",
+                ));
+            }
+        };
+
+        if arg_types_str.remove(0) != ',' {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "OSC argument type tags malformed",
+            ));
+        }
+
+        // Prepare args vec by scanning argument types
+        let mut args: Vec<Arg> = Vec::new();
+        for arg_tag in arg_types_str.chars() {
+            args.push(type_tag_to_default_arg(arg_tag)?);
+        }
+
+        let mut four_bytes = [0; 4];
+        if !args.is_empty() {
+            for arg in &mut args {
+                use self::Arg::*;
+                match arg {
+                    Int(_) => {
+                        scan_into_byte_array(&mut four_bytes, &mut i, data)?;
+                        *arg = Int(i32::from_be_bytes(four_bytes));
+                    }
+                    Float(_) => {
+                        scan_into_byte_array(&mut four_bytes, &mut i, data)?;
+                        *arg = Float(f32::from_be_bytes(four_bytes));
+                    }
+                    Str(_) => {
+                        while i < data.len() {
+                            if data[i] != 0 {
+                                curr_datagram.push(data[i]);
+                            } else {
+                                break;
+                            }
+                            i += 1;
+                        }
+                        i += 4 - (i % 4);
+                        match String::from_utf8(std::mem::take(&mut curr_datagram)) {
+                            Ok(s) => *arg = Str(s),
+                            Err(_) => {
+                                return Err(Error::new(
+                                    ErrorKind::InvalidData,
+                                    "OSC string not valid utf-8",
+                                ));
+                            }
+                        }
+                    }
+                    Blob(_) => {
+                        scan_into_byte_array(&mut four_bytes, &mut i, data)?;
+                        let blob_size = i32::from_be_bytes(four_bytes);
+                        println!("{blob_size}");
+                        let mut blob = vec![0; blob_size as usize];
+                        scan_into_byte_array(&mut blob, &mut i, data)?;
+                        *arg = Blob(blob);
+                    }
+                }
+            }
+        }
+
+        Ok(Self::new(address, args))
     }
 }
