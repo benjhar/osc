@@ -1,6 +1,8 @@
 use std::io::{Error, ErrorKind};
 
-#[derive(Debug)]
+pub mod client;
+
+#[derive(Debug, Clone)]
 pub enum Arg {
     // Core OSC Type Tags
     Int(i32),
@@ -80,6 +82,7 @@ fn scan_into_byte_array(arr: &mut [u8], idx: &mut usize, data: &[u8]) -> Result<
     Ok(())
 }
 
+#[derive(Clone)]
 pub struct OscMessage {
     pub address: String,
     pub args: Vec<Arg>,
@@ -174,7 +177,7 @@ impl OscMessage {
             }
         };
 
-        if arg_types_str.remove(0) != ',' {
+        if !arg_types_str.is_empty() && arg_types_str.remove(0) != ',' {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 "OSC argument type tags malformed",
