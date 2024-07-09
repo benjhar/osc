@@ -9,9 +9,6 @@ pub enum Arg {
     Float(f32),
     Str(String),
     Blob(Vec<u8>),
-    // Nonstandard OSC Type Tags
-    // Int64(i64),
-    // Double(f64),
 }
 
 fn arg_char_repr(arg: &Arg) -> char {
@@ -21,8 +18,6 @@ fn arg_char_repr(arg: &Arg) -> char {
         Float(_) => 'f',
         Str(_) => 's',
         Blob(_) => 'b',
-        // Int64(_) => 'h',
-        // Double(_) => 'd',
     }
 }
 
@@ -89,8 +84,11 @@ pub struct OscMessage {
 }
 
 impl OscMessage {
-    pub fn new(address: String, args: Vec<Arg>) -> Self {
-        Self { address, args }
+    pub fn new(address: impl ToString, args: Vec<Arg>) -> Self {
+        Self {
+            address: address.to_string(),
+            args,
+        }
     }
 
     pub fn build(&self) -> Vec<u8> {
@@ -226,7 +224,6 @@ impl OscMessage {
                     Blob(_) => {
                         scan_into_byte_array(&mut four_bytes, &mut i, data)?;
                         let blob_size = i32::from_be_bytes(four_bytes);
-                        println!("{blob_size}");
                         let mut blob = vec![0; blob_size as usize];
                         scan_into_byte_array(&mut blob, &mut i, data)?;
                         *arg = Blob(blob);

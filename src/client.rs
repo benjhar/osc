@@ -74,21 +74,23 @@ pub struct OscClient<C: Connection> {
     connection: C,
     message_queue: VecDeque<OscMessage>,
     timeout_secs: f32,
+    buffer: Vec<u8>,
 }
 
 impl<C: Connection> OscClient<C> {
     pub fn new<A: ToSocketAddrs, B: ToSocketAddrs>(
         client_address: A,
         remote_address: B,
+        buffer_size: usize,
         timeout_secs: Option<f32>,
     ) -> Result<Self, Error> {
         let connection = C::new(client_address, remote_address)?;
         connection.set_read_timeout(timeout_secs.map(Duration::from_secs_f32))?;
-        // connection.set_nonblocking(true)?;
         Ok(Self {
             connection,
             message_queue: VecDeque::new(),
             timeout_secs: timeout_secs.unwrap_or(1.0),
+            buffer: vec![0; buffer_size],
         })
     }
 
@@ -103,9 +105,8 @@ impl<C: Connection> OscClient<C> {
     // This returns "Error: Resource temporarily unavailable" if `buf` cannot
     // fit the message
     pub fn recv(&mut self) -> Result<OscMessage, Error> {
-        let mut buf = [0; 1024];
-        self.connection.recv(&mut buf)?;
-        OscMessage::parse_bytes(&buf)
+        self.connection.recv(&mut self.buffer)?;
+        OscMessage::parse_bytes(&self.buffer)
     }
 
     pub fn wait_for(&mut self, addr: impl ToString) -> Result<OscMessage, Error> {
@@ -114,6 +115,20 @@ impl<C: Connection> OscClient<C> {
                 let msg = self.message_queue.remove(i).unwrap();
                 return Ok(msg);
             }
+        }
+
+        match self.recv() {
+            Ok(msg) => {
+                if msg.address == addr.to_string() {
+                    return Ok(msg);
+                }
+
+                self.message_queue.push_back(msg);
+            }
+            Err(e) => match e.kind() {
+                ErrorKind::WouldBlock => {}
+                _ => return Err(e),
+            },
         }
 
         let loop_start = Instant::now();
