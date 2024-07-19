@@ -22,7 +22,7 @@ fn arg_char_repr(arg: &Arg) -> char {
     }
 }
 
-fn type_tag_to_default_arg<'a>(tag: char) -> Result<Arg, Error> {
+fn type_tag_to_default_arg(tag: char) -> Result<Arg, Error> {
     match tag {
         'i' => Ok(Arg::Int(0)),
         'f' => Ok(Arg::Float(0.0)),
@@ -59,7 +59,7 @@ fn write_arg(arg: &Arg) -> Vec<u8> {
     }
 }
 
-fn scan_into_byte_array<'a>(arr: &mut [u8], idx: &mut usize, data: &[u8]) -> Result<(), Error> {
+fn scan_into_byte_array(arr: &mut [u8], idx: &mut usize, data: &[u8]) -> Result<(), Error> {
     let length = arr.len();
     for item in &mut *arr {
         *item = *data
