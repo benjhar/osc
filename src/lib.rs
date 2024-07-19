@@ -1,6 +1,7 @@
-use std::io::{Error, ErrorKind};
-
 pub mod client;
+pub mod errors;
+
+use errors::Error;
 
 #[derive(Debug, Clone)]
 pub enum Arg {
@@ -21,16 +22,13 @@ fn arg_char_repr(arg: &Arg) -> char {
     }
 }
 
-fn type_tag_to_default_arg(tag: char) -> Result<Arg, Error> {
+fn type_tag_to_default_arg<'a>(tag: char) -> Result<Arg, Error> {
     match tag {
         'i' => Ok(Arg::Int(0)),
         'f' => Ok(Arg::Float(0.0)),
         's' => Ok(Arg::Str("".to_string())),
         'b' => Ok(Arg::Blob(Vec::new())),
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Unrecognised OSC type tag: {tag}"),
-        )),
+        _ => Err(Error::UnrecognisedTypeTag(tag)),
     }
 }
 
@@ -61,17 +59,12 @@ fn write_arg(arg: &Arg) -> Vec<u8> {
     }
 }
 
-fn scan_into_byte_array(arr: &mut [u8], idx: &mut usize, data: &[u8]) -> Result<(), Error> {
-    for item in arr {
-        *item = match data.get(*idx) {
-            Some(n) => *n,
-            None => {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    "Expected more data, given argument type tags",
-                ));
-            }
-        };
+fn scan_into_byte_array<'a>(arr: &mut [u8], idx: &mut usize, data: &[u8]) -> Result<(), Error> {
+    let length = arr.len();
+    for item in &mut *arr {
+        *item = *data
+            .get(*idx)
+            .ok_or_else(|| Error::DataLength(length, *idx))?;
         *idx += 1;
     }
     Ok(())
@@ -123,10 +116,7 @@ impl OscMessage {
     pub fn parse_bytes(data: &[u8]) -> Result<Self, Error> {
         if data.len() % 4 != 0 {
             // All valid OSC data has a length multiple of 32, so error if not.
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Input data length is not a multiple of 32",
-            ));
+            return Err(Error::Alignment(data.len(), 4));
         }
 
         let mut curr_datagram = Vec::new();
@@ -143,12 +133,7 @@ impl OscMessage {
 
         let address: String = match String::from_utf8(std::mem::take(&mut curr_datagram)) {
             Ok(s) => s,
-            Err(_) => {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    "OSC address not valid utf-8",
-                ))
-            }
+            Err(_) => return Err(Error::Utf8("OSC address".to_string())),
         };
 
         // Skip to the next part, which is always 32bit/4 byte aligned
@@ -168,18 +153,12 @@ impl OscMessage {
         let mut arg_types_str = match String::from_utf8(std::mem::take(&mut curr_datagram)) {
             Ok(s) => s,
             Err(_) => {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    "OSC argument type tags not valid utf-8",
-                ));
+                return Err(Error::Utf8("OSC argument type tags".to_string()));
             }
         };
 
         if !arg_types_str.is_empty() && arg_types_str.remove(0) != ',' {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "OSC argument type tags malformed",
-            ));
+            return Err(Error::Malformed("OSC argument type tags".to_string()));
         }
 
         // Prepare args vec by scanning argument types
@@ -214,10 +193,7 @@ impl OscMessage {
                         match String::from_utf8(std::mem::take(&mut curr_datagram)) {
                             Ok(s) => *arg = Str(s),
                             Err(_) => {
-                                return Err(Error::new(
-                                    ErrorKind::InvalidData,
-                                    "OSC string not valid utf-8",
-                                ));
+                                return Err(Error::Utf8("OSC string".to_string()));
                             }
                         }
                     }
