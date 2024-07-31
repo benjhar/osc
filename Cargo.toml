@@ -1,9 +1,15 @@
 [package]
 name = "osc"
 version = "0.1.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/benjhar/osc"
+description = "Open Sound Control Client library"
+keywords = ["audio", "osc", "networking", "sound", "control"]
+categories = ["network-programming"]
 edition = "2021"
 
 [dependencies]
 
 [lints.clippy]
 pedantic = "warn"
+cargo = "warn"
