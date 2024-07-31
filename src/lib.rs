@@ -13,7 +13,7 @@ pub enum Arg {
 }
 
 fn arg_char_repr(arg: &Arg) -> char {
-    use self::Arg::*;
+    use self::Arg::{Blob, Float, Int, Str};
     match arg {
         Int(_) => 'i',
         Float(_) => 'f',
@@ -26,37 +26,40 @@ fn type_tag_to_default_arg(tag: char) -> Result<Arg, Error> {
     match tag {
         'i' => Ok(Arg::Int(0)),
         'f' => Ok(Arg::Float(0.0)),
-        's' => Ok(Arg::Str("".to_string())),
+        's' => Ok(Arg::Str(String::new())),
         'b' => Ok(Arg::Blob(Vec::new())),
         _ => Err(Error::UnrecognisedTypeTag(tag)),
     }
 }
 
-fn write_string(arg: String) -> Vec<u8> {
+fn write_string(arg: &str) -> Vec<u8> {
     let mut bytes = arg.as_bytes().to_vec();
     bytes.append(&mut vec![b'\0'; 4 - (arg.len() % 4)]);
     assert!(bytes.len() % 4 == 0);
     bytes
 }
 
-fn write_blob(mut arg: Vec<u8>) -> Vec<u8> {
-    let mut size_bytes: Vec<u8> = (arg.len() as i32).to_be_bytes().to_vec();
+fn write_blob(mut arg: Vec<u8>) -> Result<Vec<u8>, Error> {
+    let mut size_bytes: Vec<u8> = (i32::try_from(arg.len())
+        .map_err(|_| Error::DataLength(i32::MAX as usize, arg.len())))?
+    .to_be_bytes()
+    .to_vec();
     arg.append(&mut vec![b'\0'; 4 - (arg.len() % 4)]);
     assert!(arg.len() % 4 == 0);
     size_bytes.append(&mut arg);
-    size_bytes
+    Ok(size_bytes)
 }
 
-fn write_arg(arg: &Arg) -> Vec<u8> {
-    use self::Arg::*;
-    match arg {
+fn write_arg(arg: &Arg) -> Result<Vec<u8>, Error> {
+    use self::Arg::{Blob, Float, Int, Str};
+    Ok(match arg {
         Float(f) => f.to_be_bytes().to_vec(),
         // Double(d) => d.to_be_bytes().to_vec(),
         Int(i) => i.to_be_bytes().to_vec(),
         // Int64(h) => h.to_be_bytes().to_vec(),
-        Str(s) => write_string(s.to_string()),
-        Blob(b) => write_blob(b.to_vec()),
-    }
+        Str(s) => write_string(s),
+        Blob(b) => write_blob(b.clone())?,
+    })
 }
 
 fn scan_into_byte_array(arr: &mut [u8], idx: &mut usize, data: &[u8]) -> Result<(), Error> {
@@ -77,42 +80,63 @@ pub struct OscMessage {
 }
 
 impl OscMessage {
-    pub fn new(address: impl ToString, args: Vec<Arg>) -> Self {
+    pub fn new(address: &impl ToString, args: Vec<Arg>) -> Self {
         Self {
             address: address.to_string(),
             args,
         }
     }
 
-    pub fn build(&self) -> Vec<u8> {
+    /// Builds a byte-vec out of ``self``, so that it can be sent over
+    /// a ``Connection``.
+    ///
+    /// # Errors
+    /// ## ``Error::Utf8``
+    /// If the type tags are not valid utf-8
+    ///
+    /// ## ``Error::DataLength``
+    /// If ``self`` contains an ``Arg::Blob`` which is of length > ``i32::MAX``.
+    pub fn build(&self) -> Result<Vec<u8>, Error> {
         let mut msg: Vec<u8> = Vec::new();
 
-        msg.append(&mut write_string(self.address.to_string()));
+        msg.append(&mut write_string(&self.address));
 
         let mut message_arg_types = ",".to_string();
 
         if self.args.is_empty() {
             message_arg_types = String::from_utf8(write_string(
-                String::from_utf8(message_arg_types.into_bytes()).unwrap(),
+                &String::from_utf8(message_arg_types.into_bytes())
+                    .map_err(|_| Error::Utf8("Message OSC Type Tags".to_string()))?,
             ))
-            .unwrap();
+            .map_err(|_| Error::Utf8("Message OSC Type Tags".to_string()))?;
             msg.append(&mut message_arg_types.into_bytes());
-            return msg;
+            return Ok(msg);
         }
 
         let mut message_arguments = Vec::new();
 
         for arg in &self.args {
             message_arg_types.push(arg_char_repr(arg));
-            message_arguments.append(&mut write_arg(arg));
+            message_arguments.append(&mut write_arg(arg)?);
         }
 
-        msg.append(&mut write_string(message_arg_types));
+        msg.append(&mut write_string(&message_arg_types));
         msg.append(&mut message_arguments);
 
-        msg
+        Ok(msg)
     }
 
+    /// Transforms ``data`` into an ``OscMessage``
+    ///
+    /// # Errors
+    /// If the data received is not 4-byte aligned (``data.len() % 4 == 0``) will return
+    /// ``Error::Alignment``.
+    /// If the OSC address, type tags, or arguments received are not valid Utf8, will return ``Error::Utf8``.
+    /// If the OSC type tags do not start with ',', will return ``Error::Malformed``
+    /// If ``data`` runs out while reading (i.e. is shorter than the given type tags would
+    /// suggest), will return ``Error::DataLength``
+    /// If ``data`` contains a blob that states its size is negative, will return
+    /// ``Error::BlobSize``.
     pub fn parse_bytes(data: &[u8]) -> Result<Self, Error> {
         if data.len() % 4 != 0 {
             // All valid OSC data has a length multiple of 32, so error if not.
@@ -150,11 +174,8 @@ impl OscMessage {
 
         i += 4 - (i % 4);
 
-        let mut arg_types_str = match String::from_utf8(std::mem::take(&mut curr_datagram)) {
-            Ok(s) => s,
-            Err(_) => {
-                return Err(Error::Utf8("OSC argument type tags".to_string()));
-            }
+        let Ok(mut arg_types_str) = String::from_utf8(std::mem::take(&mut curr_datagram)) else {
+            return Err(Error::Utf8("OSC argument type tags".to_string()));
         };
 
         if !arg_types_str.is_empty() && arg_types_str.remove(0) != ',' {
@@ -170,7 +191,7 @@ impl OscMessage {
         let mut four_bytes = [0; 4];
         if !args.is_empty() {
             for arg in &mut args {
-                use self::Arg::*;
+                use self::Arg::{Blob, Float, Int, Str};
                 match arg {
                     Int(_) => {
                         scan_into_byte_array(&mut four_bytes, &mut i, data)?;
@@ -200,7 +221,11 @@ impl OscMessage {
                     Blob(_) => {
                         scan_into_byte_array(&mut four_bytes, &mut i, data)?;
                         let blob_size = i32::from_be_bytes(four_bytes);
-                        let mut blob = vec![0; blob_size as usize];
+                        let mut blob = vec![
+                            0;
+                            (usize::try_from(blob_size)
+                                .map_err(|_| { Error::BlobSize(blob_size) }))?
+                        ];
                         scan_into_byte_array(&mut blob, &mut i, data)?;
                         *arg = Blob(blob);
                     }
@@ -208,6 +233,6 @@ impl OscMessage {
             }
         }
 
-        Ok(Self::new(address, args))
+        Ok(Self::new(&address, args))
     }
 }
