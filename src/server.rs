@@ -10,14 +10,18 @@
 // {
 // }
 
-use std::net::{ToSocketAddrs, UdpSocket};
+use std::{
+    collections::HashMap,
+    net::{ToSocketAddrs, UdpSocket},
+};
 
-use crate::{errors::Error, OscMessage};
+use crate::{errors::Error, Arg, OscMessage};
 
 #[allow(clippy::module_name_repetitions)]
 pub struct OscServer {
     listener: UdpSocket,
     buffer: Vec<u8>,
+    route_table: HashMap<String, fn(OscMessage) -> Option<OscMessage>>,
 }
 
 impl OscServer {
@@ -29,14 +33,18 @@ impl OscServer {
         Ok(OscServer {
             listener: UdpSocket::bind(bind_addr).map_err(Error::Socket)?,
             buffer: Vec::with_capacity(capacity),
+            route_table: HashMap::new(),
         })
     }
 
     fn handle_request(&self, request: OscMessage) -> Option<OscMessage> {
-        todo!()
+        match self.route_table.get(&request.address) {
+            Some(func) => func(request),
+            None => None,
+        }
     }
 
-    pub fn start(&mut self) -> Result<(), Error> {
+    pub fn start(mut self) -> Result<(), Error> {
         loop {
             let (size, sender) = self
                 .listener
@@ -49,5 +57,18 @@ impl OscServer {
         }
 
         Ok(())
+    }
+
+    #[must_use]
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn add_route(
+        mut self,
+        uri: impl ToString,
+        func: fn(OscMessage) -> Option<OscMessage>,
+    ) -> Self {
+        self.route_table
+            .insert(uri.to_string(), func)
+            .expect("URI already added to route table");
+        self
     }
 }
