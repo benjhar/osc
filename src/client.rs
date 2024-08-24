@@ -78,10 +78,11 @@ impl<C: Connection> OscClient<C> {
         OscMessage::parse_bytes(&self.buffer)
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn handle_waiting_errors(
         &mut self,
         res: Result<OscMessage, Error>,
-        addr: &impl ToString,
+        addr: impl ToString,
     ) -> Result<Option<OscMessage>, Error> {
         match res {
             Ok(msg) => {
@@ -107,7 +108,8 @@ impl<C: Connection> OscClient<C> {
     /// data takes longer than ``self.timeout_secs``
     /// Will also return ``Err(Error::Socket)`` if the call to ``connection.recv`` returns an error
     /// other than ``io::Error::WouldBlock``
-    pub fn wait_for(&mut self, addr: &impl ToString) -> Result<OscMessage, Error> {
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn wait_for(&mut self, addr: impl ToString + Clone) -> Result<OscMessage, Error> {
         for i in 0..self.message_queue.len() {
             if self.message_queue[i].address == addr.to_string() {
                 let msg = unsafe { self.message_queue.remove(i).unwrap_unchecked() };
@@ -116,14 +118,14 @@ impl<C: Connection> OscClient<C> {
         }
 
         let rec = self.recv();
-        if let Some(msg) = self.handle_waiting_errors(rec, addr)? {
+        if let Some(msg) = self.handle_waiting_errors(rec, addr.clone())? {
             return Ok(msg);
         }
 
         let loop_start = Instant::now();
         loop {
             let rec = self.recv();
-            if let Some(msg) = self.handle_waiting_errors(rec, addr)? {
+            if let Some(msg) = self.handle_waiting_errors(rec, addr.clone())? {
                 return Ok(msg);
             }
 
