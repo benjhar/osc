@@ -13,3 +13,11 @@ edition = "2021"
 [lints.clippy]
 pedantic = "warn"
 cargo = "warn"
+
+[[example]]
+name = "ping_server"
+path = "examples/ping_server.rs"
+
+[[example]]
+name = "ping_client"
+path = "examples/ping_client.rs"

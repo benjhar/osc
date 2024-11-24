@@ -12,7 +12,7 @@
 
 use std::{
     collections::HashMap,
-    net::{ToSocketAddrs, UdpSocket},
+    net::{SocketAddr, ToSocketAddrs, UdpSocket},
 };
 
 use crate::{errors::Error, Arg, OscMessage};
@@ -21,7 +21,7 @@ use crate::{errors::Error, Arg, OscMessage};
 pub struct OscServer {
     listener: UdpSocket,
     buffer: Vec<u8>,
-    route_table: HashMap<String, fn(OscMessage) -> Option<OscMessage>>,
+    route_table: HashMap<String, fn(&OscMessage) -> Option<Vec<Arg>>>,
 }
 
 impl OscServer {
@@ -37,7 +37,14 @@ impl OscServer {
         })
     }
 
-    fn handle_request(&self, request: OscMessage) -> Option<OscMessage> {
+    #[must_use]
+    pub fn address(&self) -> SocketAddr {
+        self.listener
+            .local_addr()
+            .expect("Unable to access local addr.")
+    }
+
+    fn handle_request(&self, request: &OscMessage) -> Option<Vec<Arg>> {
         match self.route_table.get(&request.address) {
             Some(func) => func(request),
             None => None,
@@ -45,18 +52,24 @@ impl OscServer {
     }
 
     pub fn start(mut self) -> Result<(), Error> {
+        println!("Server starting on {}", self.address());
         loop {
-            let (size, sender) = self
-                .listener
-                .recv_from(&mut self.buffer)
-                .map_err(Error::Socket)?;
-            let message = OscMessage::parse_bytes(&self.buffer)?;
-            if let Some(response) = self.handle_request(message) {
-                self.listener.send_to(&response.build()?, sender);
+            println!("waiting");
+            if let Ok((_, sender)) = self.listener.recv_from(&mut self.buffer) {
+                println!("Message received from {sender}: {:?}", self.buffer);
+                if let Ok(mut message) = OscMessage::parse_bytes(&self.buffer) {
+                    println!(
+                        "Destined for: {}, carrying: {:?}",
+                        message.address, message.args
+                    );
+                    if let Some(response) = self.handle_request(&message) {
+                        println!("Responding: {response:?}");
+                        message.args = response;
+                        let _ = self.listener.send_to(&message.build()?, sender);
+                    }
+                }
             }
         }
-
-        Ok(())
     }
 
     #[must_use]
@@ -64,11 +77,12 @@ impl OscServer {
     pub fn add_route(
         mut self,
         uri: impl ToString,
-        func: fn(OscMessage) -> Option<OscMessage>,
+        func: fn(&OscMessage) -> Option<Vec<Arg>>,
     ) -> Self {
-        self.route_table
-            .insert(uri.to_string(), func)
-            .expect("URI already added to route table");
+        assert!(
+            self.route_table.insert(uri.to_string(), func).is_none(),
+            "URI already added to route table"
+        );
         self
     }
 }

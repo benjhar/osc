@@ -5,7 +5,7 @@ pub mod sockets;
 
 use errors::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Arg {
     // Core OSC Type Tags
     Int(i32),
@@ -75,7 +75,7 @@ fn scan_into_byte_array(arr: &mut [u8], idx: &mut usize, data: &[u8]) -> Result<
     Ok(())
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct OscMessage {
     pub address: String,
     pub args: Vec<Arg>,
