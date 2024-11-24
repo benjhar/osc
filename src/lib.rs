@@ -13,6 +13,51 @@ pub enum Arg {
     Blob(Vec<u8>),
 }
 
+impl TryFrom<Arg> for i32 {
+    type Error = Error;
+    fn try_from(value: Arg) -> Result<Self, Self::Error> {
+        match value {
+            Arg::Int(i) => Ok(i),
+            _ => Err(Self::Error::Malformed(format!("{value:?} is not i32"))),
+        }
+    }
+}
+
+impl TryFrom<Arg> for f32 {
+    type Error = Error;
+
+    fn try_from(value: Arg) -> Result<Self, Self::Error> {
+        match value {
+            Arg::Float(f) if (0.0..=1.0).contains(&f) => Ok(f),
+            _ => Err(Error::Malformed(format!(
+                "{value:?} is not Float or is not in the valid OSC range (0..=1)"
+            ))),
+        }
+    }
+}
+
+impl TryFrom<Arg> for String {
+    type Error = Error;
+
+    fn try_from(value: Arg) -> Result<Self, Self::Error> {
+        match value {
+            Arg::Str(s) => Ok(s),
+            _ => Err(Error::Malformed(format!("{value:?} is not String"))),
+        }
+    }
+}
+
+impl TryFrom<Arg> for Vec<u8> {
+    type Error = Error;
+
+    fn try_from(value: Arg) -> Result<Self, Self::Error> {
+        match value {
+            Arg::Blob(b) => Ok(b),
+            _ => Err(Error::Malformed(format!("{value:?} is not Vec<u8>"))),
+        }
+    }
+}
+
 fn arg_char_repr(arg: &Arg) -> char {
     use self::Arg::{Blob, Float, Int, Str};
     match arg {
