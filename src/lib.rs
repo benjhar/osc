@@ -71,6 +71,18 @@ impl TryFrom<Arg> for Vec<u8> {
         }
     }
 }
+
+impl<const N: usize> TryFrom<Arg> for [u8; N] {
+    type Error = Error;
+
+    fn try_from(value: Arg) -> Result<Self, Self::Error> {
+        match value {
+            Arg::Blob(b) if b.len() == N => Ok(b.try_into().unwrap()),
+            _ => Err(Error::Malformed(format!("{value:?} is not [u8; {N}]"))),
+        }
+    }
+}
+
 impl From<Vec<u8>> for Arg {
     fn from(value: Vec<u8>) -> Self {
         Arg::Blob(value)
