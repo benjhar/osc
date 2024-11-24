@@ -23,6 +23,12 @@ impl TryFrom<Arg> for i32 {
     }
 }
 
+impl From<i32> for Arg {
+    fn from(value: i32) -> Self {
+        Arg::Int(value)
+    }
+}
+
 impl TryFrom<Arg> for f32 {
     type Error = Error;
 
@@ -35,7 +41,11 @@ impl TryFrom<Arg> for f32 {
         }
     }
 }
-
+impl From<f32> for Arg {
+    fn from(value: f32) -> Self {
+        Arg::Float(value)
+    }
+}
 impl TryFrom<Arg> for String {
     type Error = Error;
 
@@ -46,7 +56,11 @@ impl TryFrom<Arg> for String {
         }
     }
 }
-
+impl From<String> for Arg {
+    fn from(value: String) -> Self {
+        Arg::Str(value)
+    }
+}
 impl TryFrom<Arg> for Vec<u8> {
     type Error = Error;
 
@@ -57,7 +71,11 @@ impl TryFrom<Arg> for Vec<u8> {
         }
     }
 }
-
+impl From<Vec<u8>> for Arg {
+    fn from(value: Vec<u8>) -> Self {
+        Arg::Blob(value)
+    }
+}
 fn arg_char_repr(arg: &Arg) -> char {
     use self::Arg::{Blob, Float, Int, Str};
     match arg {
