@@ -126,7 +126,8 @@ pub struct OscMessage {
 }
 
 impl OscMessage {
-    pub fn new(address: &impl ToString, args: Vec<Arg>) -> Self {
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn new(address: impl ToString, args: Vec<Arg>) -> Self {
         Self {
             address: address.to_string(),
             args,
@@ -279,6 +280,6 @@ impl OscMessage {
             }
         }
 
-        Ok(Self::new(&address, args))
+        Ok(Self::new(address, args))
     }
 }
