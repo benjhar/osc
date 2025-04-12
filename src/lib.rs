@@ -141,9 +141,7 @@ fn write_arg(arg: &Arg) -> Result<Vec<u8>, Error> {
 fn scan_into_byte_array(arr: &mut [u8], idx: &mut usize, data: &[u8]) -> Result<(), Error> {
     let length = arr.len();
     for item in &mut *arr {
-        *item = *data
-            .get(*idx)
-            .ok_or_else(|| Error::DataLength(length, *idx))?;
+        *item = *data.get(*idx).ok_or(Error::DataLength(length, *idx))?;
         *idx += 1;
     }
     Ok(())
